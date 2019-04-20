@@ -1,60 +1,138 @@
-import "babel-polyfill";
-import Chart from "chart.js";
+import 'babel-polyfill';
+import Chart from 'chart.js';
 
-const currencyURL = "www.ecb.europa.eu/stats/eurofxref/eurofxref-daily.xml";
-// const meteoURL = "/xml.meteoservice.ru/export/gismeteo/point/140.xml";
+const meteoURL = '/xml.meteoservice.ru/export/gismeteo/point/140.xml';
 
-async function loadCurrency() {
-  const response = await fetch(currencyURL);
-  const xmlTest = await response.text();
+const getXml = url => {
   const parser = new DOMParser();
-  const currencyData = parser.parseFromString(xmlTest, "text/xml");
-  // <Cube currency="USD" rate="1.1321" />
-  const rates = currencyData.querySelectorAll("Cube[currency][rate]");
-  const result = Object.create(null);
-  for (let i = 0; i < rates.length; i++) {
-    const rateTag = rates.item(i);
-    const rate = rateTag.getAttribute("rate");
-    const currency = rateTag.getAttribute("currency");
-    result[currency] = rate;
-  }
-  result["EUR"] = 1;
-  // result["RANDOM"] = 1 + Math.random();
-  return result;
-}
 
-function normalizeDataByCurrency(data, currency) {
-  const result = Object.create(null);
-  const value = data[currency];
-  for (const key of Object.keys(data)) {
-    result[key] = value / data[key];
-  }
-  return result;
-}
+  return fetch(url, {
+    method: 'GET',
+    Accept: 'application/xml',
+    headers: new Headers({
+      'content-type': 'application/x-www-form-urlencoded',
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, POST, PUT',
+      'Access-Control-Allow-Headers': 'Content-Type'
+    }),
+    mode: 'no-cors'
+  })
+    .then(response => response.text())
+    .then(response => parser.parseFromString(response, 'text/xml'));
+};
 
-const buttonBuild = document.getElementById("btn");
-const canvasCtx = document.getElementById("out").getContext("2d");
-buttonBuild.addEventListener("click", async function() {
-  const currencyData = await loadCurrency();
-  const normalData = normalizeDataByCurrency(currencyData, "RUB");
-  const keys = Object.keys(normalData).sort((k1, k2) =>
-    compare(normalData[k1], normalData[k2])
-  );
-  const plotData = keys.map(key => normalData[key]);
+const loadTemperature = async () => {
+  const meteoXml = await getXml(meteoURL);
+
+  const real = meteoXml.querySelectorAll('TEMPERATURE');
+  const perceived = meteoXml.querySelectorAll('HEAT');
+
+  const result = {
+    realTemperature: {},
+    perceivedTemperature: {}
+  };
+
+  const addData = (nodes, data) => {
+    [...nodes].forEach(item => {
+      const temp = item.getAttribute('max');
+      const hour = `${item.parentNode.getAttribute('hour')}:00`;
+      data[hour] = temp;
+    });
+  };
+
+  addData(real, result.realTemperature);
+  addData(perceived, result.perceivedTemperature);
+
+  return result;
+};
+
+const buttonBuild = document.getElementById('btn');
+const canvasCtx = document.getElementById('out').getContext('2d');
+
+buttonBuild.addEventListener('click', async () => {
+  const tempData = await loadTemperature();
+
+  const timeKeys = Object.keys(tempData.realTemperature);
+  const realTemp = timeKeys.map(key => tempData.realTemperature[key]);
+  const perceivedTemp = timeKeys.map(key => tempData.perceivedTemperature[key]);
 
   const chartConfig = {
-    type: "line",
-
+    type: 'line',
     data: {
-      labels: keys,
+      labels: timeKeys,
       datasets: [
         {
-          label: "Стоимость валюты в рублях",
-          backgroundColor: "rgb(255, 20, 20)",
-          borderColor: "rgb(180, 0, 0)",
-          data: plotData
+          label: 'Температура',
+          backgroundColor: 'rgb(173, 243, 19)',
+          borderColor: 'rgb(62, 90, 0)',
+          pointBackgroundColor: 'rgb(241, 253, 215)',
+          data: realTemp,
+          borderJoinStyle: 'round',
+          borderWidth: 2,
+          pointHoverBorderWidth: 4,
+          lineTension: 0.4,
+          pointRadius: 6,
+          pointHoverRadius: 7,
+          pointStyle: 'rectRounded'
+        },
+        {
+          label: 'Температура по ощущениям',
+          backgroundColor: 'rgb(14, 176, 176)',
+          borderColor: 'rgb(0, 57, 57)',
+          pointBackgroundColor: 'rgb(205, 241, 241',
+          data: perceivedTemp,
+          borderDash: [10, 5],
+          borderJoinStyle: 'round',
+          borderWidth: 2,
+          pointHoverBorderWidth: 4,
+          lineTension: 0.4,
+          pointRadius: 6,
+          pointHoverRadius: 7,
+          pointStyle: 'rectRounded'
         }
       ]
+    },
+    options: {
+      legend: {
+        position: 'right',
+        labels: {
+          fontSize: 14,
+          fontColor: 'black',
+          boxWidth: 30,
+          padding: 30
+        }
+      },
+      animation: {
+        duration: 1500,
+        easing: 'easeInOutElastic'
+      },
+      title: {
+        display: true,
+        text: 'График погоды в Уфе',
+        fontSize: 16
+      },
+      scales: {
+        yAxes: [
+          {
+            scaleLabel: {
+              display: true,
+              labelString: 'Температура, °C',
+              fontColor: 'black',
+              fontSize: 14
+            }
+          }
+        ],
+        xAxes: [
+          {
+            scaleLabel: {
+              display: true,
+              labelString: 'Местное время',
+              fontColor: 'black',
+              fontSize: 14
+            }
+          }
+        ]
+      }
     }
   };
 
@@ -63,15 +141,9 @@ buttonBuild.addEventListener("click", async function() {
     chart.data.datasets[0].data = chartConfig.data.datasets[0].data;
     chart.update({
       duration: 800,
-      easing: "easeOutBounce"
+      easing: 'easeOutBounce'
     });
   } else {
     window.chart = new Chart(canvasCtx, chartConfig);
   }
 });
-
-function compare(a, b) {
-  if (a > b) return 1;
-  if (a < b) return -1;
-  return 0;
-}
